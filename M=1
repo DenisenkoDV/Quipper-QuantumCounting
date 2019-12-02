@@ -1,0 +1,238 @@
+\onecolumn
+
+ \section*{Приложение №2. Программная реализация применения алгоритма квантового перечисления для оценки веса булевой функции в квантовом симуляторе Quipper}\addcontentsline{toc}{section}{ } \label{appendix1}
+
+\lstset{
+	language=Haskell,
+	firstnumber= 1, %firstnumber= #1
+	captionpos=t,
+	%frame=single,
+	%breaklines=true
+}
+%\lstinputlisting[language=Mathematica, ]{src/code1/QSDES.hs}
+%\begin{lstlisting}[	basicstyle=\tiny]
+\begin{lstlisting}[	basicstyle=\scriptsize]
+module Main where
+
+import System.Random
+import Data.Time
+import Quipper
+import Quipper.Printing
+import QuipperLib.Simulation
+import Quipper.QData
+import QuipperLib.QFT
+
+-- Run the program
+main :: IO ()
+main = do
+--  testF
+--  test1_circuit-- 1)
+--  test1_exec --2)
+--  test2_circuit --3)
+--  test2_exec --4) prob distribution after 1 Grover's iter
+--  test_estimateM_circuit --5) QC for estimating M
+test_estimateM_exec
+
+-- Tests
+testF :: IO ()
+testF = do
+g <- newStdGen
+putStrLn "finding differentials myF"
+startTime <- getCurrentTime
+print $ sim_generic undefined  myF ([False,False,False,False,False,False],False)
+stopTime <- getCurrentTime
+let deltaTime = show $ diffUTCTime stopTime startTime
+putStrLn deltaTime
+
+myF :: ([Qubit],Qubit) -> Circ ([Qubit],Qubit)
+myF (params,output) = do
+let [x1,x2,x3 ,x4,x5,x6] = params
+--  qnot_at output `controlled` (x1,x2,x3,x4,x5)
+--  qnot_at output `controlled` (x1,x2,x3,x4,x6)
+qnot_at output `controlled` (x1,x2,x3,x4,x5,x6)
+return (params,output)
+
+-- Oracle for QmyF.
+myOracle :: ([Qubit],Qubit) -> Circ Qubit
+myOracle (inputX,oracle) = do
+(inputX,oracle) <- myF (inputX,oracle)
+return oracle
+
+-- Circuit inversion about mean / Conditional Phase Flip (CPF)
+inversion_about_mean ::  [Qubit] -> Circ [Qubit]
+inversion_about_mean top_qubits = do
+comment "start inversion about mean"
+mapUnary hadamard top_qubits
+mapUnary gate_X top_qubits
+let pos = (length top_qubits) - 1
+let target_qubit = top_qubits !!  pos
+let controlled_qubit = take pos top_qubits
+hadamard_at target_qubit
+qnot_at target_qubit `controlled` controlled_qubit
+hadamard_at target_qubit
+mapUnary gate_X top_qubits
+mapUnary hadamard top_qubits
+comment "end inversion about mean"
+return top_qubits
+
+-- Grover's Algorithm
+grover_search_circuit ::  (Int) -> Circ ([Bit],Bit)
+grover_search_circuit (iterations_num ) = do 
+inputX <- qinit (replicate 6 False)  
+oracle <- qinit True --flag qubit
+mapUnary hadamard inputX
+hadamard_at oracle
+-- Start Grover's iteration
+let index = iterations_num
+for 1 (index) 1 $ \i -> do
+comment ""--"start grover iteration"
+oracle <- myOracle (inputX,oracle) --myOracle
+inputX <- inversion_about_mean inputX
+comment "" --"after grover iteration"
+endfor
+-- Measuring,getting result.
+hadamard_at oracle
+(inputX,oracle) <- measure (inputX,oracle)
+--cdiscard oracle
+return (inputX,oracle)
+
+-- Estimating M
+--estimateM :: ([Qubit],[Qubit]) -> Circ ([Bit],[Bit])
+estimateM :: ([Qubit],[Qubit]) -> Circ ([Bit])
+estimateM (topQubits,bottomQubits) = do 
+topQubits    <- qinit (replicate 5 False)
+mapUnary hadamard topQubits  
+bottomQubits <- qinit (replicate 7 False)    
+let [x0,x1,x2,x3,x4,x5,oracle] = bottomQubits
+qnot_at oracle
+mapUnary hadamard bottomQubits
+let [t4,t3,t2,t1,t0] = topQubits --t4 - most sign qbit (top),t0 - least sign qbit (bottom)
+
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t0
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t0
+
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t1
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t1
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t1
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t1
+
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t2
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t2
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t2
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t2
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t2
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t2
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t2
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t2
+
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t3
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t3
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t3
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t3
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t3
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t3
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t3
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t3
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t3
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t3
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t3
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t3
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t3
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t3
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t3
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t3
+
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+oracle <- myOracle ([x0,x1,x2,x3,x4,x5],oracle) `controlled` t4
+[x0,x1,x2,x3,x4,x5] <- inversion_about_mean   [x0,x1,x2,x3,x4,x5] `controlled` t4
+
+--  (bottomQubits) <- measure (bottomQubits) --Not mandatary procedure
+topQubits <-  (reverse_generic_endo qft_big_endian) topQubits
+(topQubits) <- measure (topQubits)  
+return topQubits
+
+-- Test1
+test1_circuit :: IO ()
+test1_circuit = do
+putStrLn "myF functionality test:"
+print_generic GateCount  myF ( replicate 6 qubit,qubit)  
+print_generic PDF myF (replicate 6 qubit,qubit)  
+
+test1_exec :: IO ()
+test1_exec = do
+putStrLn "myF functionality test:"
+print_generic GateCount myF ( replicate 6 qubit,qubit)  
+g <- newStdGen
+print $ run_generic g (0.0 :: Double) myF ([False,False,False,False,False,False],False)
+print $ run_generic g (0.0 :: Double) myF ([False,False,False,False,False, True],False)
+print $ run_generic g (0.0 :: Double) myF ([False,False,False,False, True,False],False)
+print $ run_generic g (0.0 :: Double) myF ([False,False,False,False, True, True],False)
+-- etc.
+
+test2_circuit :: IO()
+test2_circuit = do
+putStrLn "Quantum exhaustive inputX search (1 inputX):"
+let parameters = (1) --only Int
+print_generic GateCount (grover_search_circuit parameters)
+print_generic PDF (grover_search_circuit parameters)
+
+test2_exec :: IO()
+test2_exec = do
+putStrLn "Quantum exhaustive inputX search (1 inputX):"
+startTime <- getCurrentTime
+let parameters = (1) -- 1 Grover's iter
+g <- newStdGen
+--  print $ run_generic g (0.0 :: Double) (grover_search_circuit parameters)
+print $ sim_generic undefined (grover_search_circuit parameters)
+stopTime <- getCurrentTime
+let deltaTime = show $ diffUTCTime stopTime startTime
+putStrLn deltaTime
+
+test_estimateM_circuit :: IO()
+test_estimateM_circuit = do
+putStrLn "test_estimateM_circuit:"
+let parameters = (replicate 5 qubit,replicate 7 qubit)
+print_generic GateCount (estimateM  parameters)
+print_generic PDF (estimateM parameters)
+
+test_estimateM_exec :: IO()
+test_estimateM_exec = do
+putStrLn "test_estimateM_exec"
+startTime <- getCurrentTime
+let parameters = (replicate 5 qubit,replicate 7 qubit)
+g <- newStdGen
+--  print $ run_generic g (0.0 :: Double) (estimateM  parameters) -- one vector 
+print $ sim_generic undefined (estimateM  parameters) --full distribution
+stopTime <- getCurrentTime
+let deltaTime = show $ diffUTCTime stopTime startTime
+putStrLn deltaTime
+\end{lstlisting}
